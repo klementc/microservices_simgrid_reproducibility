@@ -1,0 +1,710 @@
+* Reproducing DeathStarBench results
+
+  This notebook describes the different steps we used to obtain our results. One
+  should be able to follow those steps to reproduce them. We describe:
+
+  - The code and software required to run the experiment
+  - The files and code we used in our use case
+  - The sequence of commands to produce our results
+
+** Software requirements
+
+   To do this experiment, you will need:
+
+  - docker, docker-compose, gawk, lua5.1
+    #+BEGIN_SRC
+    # docker from the install script
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh
+    # other dependencies used to deploy the application and launch the benchmarks
+    apt install -y lua5.1 liblua5.1 liblua5.1-dev luarocks docker-compose gawk
+    luarocks install luasocket
+    #+END_SRC 
+  - SimGrid microservice model and code generation scripts (this repository)
+  - Modified Jaeger front-end to obtain a .dot graph from an execution trace
+    required before code generation: [[https://github.com/klementc/jaeger-ui]]
+    #+BEGIN_SRC 
+    git clone git@github.com:klementc/jaeger-ui.git
+    cd jaeger-ui
+    nvm use
+    yarn install
+    # To start jaeger-ui (the back-end need to be run separately)
+    yarn start
+    #+END_SRC
+  - DeathStarBench dockerfiles (see our docker-compose modifications later) and
+    benchmarking scripts: [[https://github.com/delimitrou/DeathStarBench]] 
+    #+BEGIN_SRC
+    git clone https://github.com/delimitrou/DeathStarBench.git
+    # we will only use the content of the socialnetwork/ folder
+    #+END_SRC
+  - This repository, and the content of the [[./resource/]] folder
+    #+BEGIN_SRC
+    git clone git@github.com:klementc/calvin-microbenchmarks.git
+    #+END_SRC
+** Step 1: Calibration run of DeathStarBench
+
+   The Goal of the calibration step is to obtain an execution trace from
+   deathstarbench that we can use to calibrate and generate the simulation code
+   for SimGrid.
+   To do so, we
+   1. Deploy the application on a single machine
+   2. Execute some requests without overloading the application
+   3. Visualize execution traces obtained through jaeger
+   4. Export one of the execution traces as a .dot graph
+
+*** Deployment
+    Simply go to the right folder, and docker-compose up using the default file.
+    #+BEGIN_SRC
+cd DeathStarBench/socialNetwork/
+docker-compose pull # get the images from dockerhub
+docker-compose up -d
+docker ps
+    #+END_SRC
+
+    Once done, your services should be up and running, and you should be able to
+    access the application (use chrome if you want to test the application
+    manually, firefox seems to have issues at the time of writing). 
+    - Front end : [[http://localhost:8080/]] create an account, log into it and you
+      can try composing a message, adding friends etc
+    - Jaeger: [[http://localhost:16686/search]] once you did a few requests, you
+      should be able to observe the actions that happened with jaeger. Click on
+      a trace to observe it in details.
+    
+*** Execute calibration requests
+
+    To obtain an execution trace to generate the simulator, we need to execute
+    some requests. With DeathStarBench, we notice an impact of cache on
+    execution times. Indeed, when launching a very small amount of requests per
+    second, we have much longer execution times than what is possible. What we
+    want to simulate is the application in a "stable" state, meaning we want an
+    execution trace of the "average" request duration. To do so, we can execute
+    a load of around 100 requests per second, which is not enough to overload
+    the resources of most machines (adapt it if you have very limited
+    resources), while still catching the advantages of cache and in-memory
+    storage.
+
+    To launch this load, we use the load-generation scripts available for
+    DeathStarBench. We make 100 compose requests per second for 1 minute.
+
+    #+BEGIN_SRC
+# from the socialNetwork/ folder
+cd wrk2
+make # build the benchmarking tool
+# launch the calibratio
+./wrk -D fixed -T 60s -t 1 -c 1 -d 60s -L -s ./scripts/social-network/compose-post.lua http://192.168.1.74:8080/wrk2-api/post/compose -R 100
+    #+END_SRC
+
+    This benchmark should output some information on how many requests have been
+    performed during the 60 seconds, tail-latencies etc. On our test-machine, we
+    obtain 100 RPS (meaning the application is not overloaded, otherwise the
+    output load would be different to the input load), and an latency between 3
+    and 4 millisecond per request. If you notice that your machine has some
+    request loss, or abnormal latencies, relaunch your calibration with a new
+    load.
+
+    Now that we ran the calibration, we need to obtain an execution trace of
+    this calibration that we will use to generate the simulator code.
+*** Export an execution trace
+    
+    To observe the execution traces, you can go to the jaeger front-end at
+    [[http://localhost:16686]], select *nginx-web-server* and the *COMPOSE*
+    request. This should give you a screen such as in the following picture:
+
+    [[./resources/Jaeger_Screen_1.png]]
+
+    Now, the goal is to choose a trace that fit the average behaviour of the
+    application. In our case, we find the average request to take a bit more
+    than 3ms to be executed. We go through the registered traces and select one
+    of the requests fitting this execution time (knowing that you can later
+    modify the requestRatio of the simulated execution to fit more or less
+    powerful nodes. The most important here is to obtain the ratio of time spent
+    executing between each service, which should not change with different
+    configurations). Because we want to obtain a trace as a dot graph, so that
+    it can be processed with our code generator, let's launch our modified
+    jaeger front-end:
+
+    #+BEGIN_SRC
+cd jaeger-ui/
+yarn start
+    #+END_SRC
+    
+    Wait for a few seconds, and you should be able to access [[localhost:3000]]
+    Go to the trace you selected and, in the *Trace Graph* panel, download the
+    trace as a dot file as shown in the following
+
+    [[./resources/Jaeger_Screen_2.png]]
+
+    That's it, you can now remove the application, and process to the generation
+    of the simulator!
+
+    #+BEGIN_SRC
+# from the socialNetwork/ folder
+docker-compose down
+    #+END_SRC
+
+** Step 2: Code generation for SimGrid
+
+   The output of this step can be found in the "generated_2inst.cpp" file. We
+   modified a bit more this file than described here to fit our experimental
+   requirements, to have 2 running instances of each service, and an additional
+   launch parameter to specify the frequency of requests without recompiling the
+   code after each modification.
+
+   We now have an execution trace from the application. The next step is to use
+   this trace to obtain a runnable simulator that transposed the constraints of
+   the application into SimGrid code. To do so, we
+   1. Use SimGrid code generation script to process and transform the graph from
+      step 1 into code
+   2. Add a few logging and request generation objects to the produced code
+   3. Compile the code into a runnable simulator
+
+   If you didn't get an execution step or skipped the previous section, you can
+   use the trace we use for our published experimental results, that can be
+   found in [[./resources/graph_compose_100p.dot]]
+
+*** Call simgrid code generation on the execution trace
+
+    Before generating the code, here is what the exported trace looks like:
+
+    [[./resources/graph_compose_100p.png]]
+
+    The script we use is in the internship_simgrid project.
+    Remember the path of your trace and launch the following
+
+    #+BEGIN_SRC
+cd internship_simgrid/script
+python graphReader.py -i
+    #+END_SRC
+
+    Here are some logs of what we obtain:
+
+    #+BEGIN_SRC
+Welcome to the simulation code generator.
+Before executing this you need to obtain jaeger traces of the requests you
+want in your simulator as a dot file. You can obtain them from this modified jaeger-ui: https://github.com/klementc/jaeger-ui
+Do you want to add a new trace to your simulator? [Y/n] Y
+Enter the request name associated to this trace : COMPOSE
+Enter the path to your file : testdot/graph_compose_100p.dot
+Processing dot graph for request COMPOSE (file: testdot/graph_compose_100p.dot)
+Sequence, no problem add: %s %s {'dur': '149', 'label': 'nginx_web_server'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclient']
+Sequence, no problem add: %s %s {'dur': '258', 'label': 'nginx_web_server'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostserver']
+Sequence, no problem add: %s %s {'dur': '544', 'label': 'compose_post_service'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicecomposeuniqueidclient', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicecomposemediaclient', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicecomposecreatorclient', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicecomposetextclient', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicewritehometimelineclient', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicewriteusertimelineclient', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicestorepostclient']
+FORK 7 nodes
+Execute in parallel?
+Node: compose_post_service
+Childs: 
+	- compose_post_service
+	- compose_post_service
+	- compose_post_service
+	- compose_post_service
+	- compose_post_service
+	- compose_post_service
+	- compose_post_service
+ [Y/n] 
+Sequence, no problem add: %s %s {'dur': '12', 'label': 'unique_id_service'} []
+Sequence, no problem add: %s %s {'dur': '6', 'label': 'media_service'} []
+Sequence, no problem add: %s %s {'dur': '5', 'label': 'user_service'} []
+Sequence, no problem add: %s %s {'dur': '296', 'label': 'text_service'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicecomposetextclienttextservicecomposetextservertextservicecomposeusermentionsclient', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicecomposetextclienttextservicecomposetextservertextservicecomposeurlsclient']
+FORK 2 nodes
+Execute in parallel?
+Node: text_service
+Childs: 
+	- text_service
+	- text_service
+ [Y/n] n
+Sequence, no problem add: %s %s {'dur': '81', 'label': 'user_mention_service'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicecomposetextclienttextservicecomposetextservertextservicecomposeusermentionsclientusermentionservicecomposeusermentionsserverusermentionservicecomposeusermentionsmemcachedgetclientLEAF', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicecomposetextclienttextservicecomposetextservertextservicecomposeusermentionsclientusermentionservicecomposeusermentionsserverusermentionservicecomposeusermentionsmongofindclientLEAF']
+FORK 2 nodes
+Execute in parallel?
+Node: user_mention_service
+Childs: 
+	- user_mention_service
+	- user_mention_service
+ [Y/n] n
+Only one node, add it and return
+Only one node, add it and return
+Sequence, no problem add: %s %s {'dur': '117', 'label': 'url_shorten_service'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicecomposetextclienttextservicecomposetextservertextservicecomposeurlsclienturlshortenservicecomposeurlsserverurlshortenserviceurlmongoinsertclientLEAF']
+Sequence, no problem add: %s %s {'dur': '438', 'label': 'url_shorten_service'} []
+Sequence, no problem add: %s %s {'dur': '22', 'label': 'home_timeline_service'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicewritehometimelineclienthometimelineservicewritehometimelineserverhometimelineservicegetfollowersclient', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicewritehometimelineclienthometimelineservicewritehometimelineserverhometimelineservicewritehometimelineredisupdateclientLEAF']
+FORK 2 nodes
+Execute in parallel?
+Node: home_timeline_service
+Childs: 
+	- home_timeline_service
+	- home_timeline_service
+ [Y/n] n
+Sequence, no problem add: %s %s {'dur': '78', 'label': 'social_graph_service'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicewritehometimelineclienthometimelineservicewritehometimelineserverhometimelineservicegetfollowersclientsocialgraphservicegetfollowersserversocialgraphservicesocialgraphredisgetclientLEAF', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicewritehometimelineclienthometimelineservicewritehometimelineserverhometimelineservicegetfollowersclientsocialgraphservicegetfollowersserversocialgraphservicesocialgraphmongofindclientLEAF']
+FORK 2 nodes
+Execute in parallel?
+Node: social_graph_service
+Childs: 
+	- social_graph_service
+	- social_graph_service
+ [Y/n] n
+Only one node, add it and return
+Only one node, add it and return
+Only one node, add it and return
+Sequence, no problem add: %s %s {'dur': '93', 'label': 'user_timeline_service'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicewriteusertimelineclientusertimelineservicewriteusertimelineserverusertimelineservicewriteusertimelinemongoinsertclientLEAF', 'nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicewriteusertimelineclientusertimelineservicewriteusertimelineserverusertimelineservicewriteusertimelineredisupdateclientLEAF']
+FORK 2 nodes
+Execute in parallel?
+Node: user_timeline_service
+Childs: 
+	- user_timeline_service
+	- user_timeline_service
+ [Y/n] n
+Only one node, add it and return
+Only one node, add it and return
+Sequence, no problem add: %s %s {'dur': '51', 'label': 'post_storage_service'} ['nginxwebserverwrkapipostcomposenginxwebserverwrkapipostcomposenginxwebservercomposepostclientcomposepostservicecomposepostservercomposepostservicestorepostclientpoststorageservicestorepostserverpoststorageservicepoststoragemongoinsertclientLEAF']
+Sequence, no problem add: %s %s {'dur': '340', 'label': 'post_storage_service'} []
+Save seq output graph as image to 'testdot/graph_compose_100p.dot_seqnot.png', dot file to 'testdot/graph_compose_100p.dot_seqnot.dot'
+Save processed ouput as image to 'testdot/graph_compose_100p.dot_seqnot_processed.png', dot file to 'testdot/graph_compose_100p.dot_seqnot_processed.dot'
+Render testdot/graph_compose_100p.dot_seqnot.dot to testdot/graph_compose_100p.dot_seqnot.png
+Render testdot/graph_compose_100p.dot_seqnot_processed.dot to testdot/graph_compose_100p.dot_seqnot_processed.png
+Sum of times in the original file: 7290
+Sum of times in the the processed graph: 7290
+Sum of times in the the final graph: 7290
+Do you want to add a new trace to your simulator? [Y/n] n
+All traces processed. Now generating code for :
+	- Trace COMPOSE
+Please give the name of the code file to produce : codeProduced.cpp
+generate output code for request COMPOSE
+
+edge:  ('nginx_web_server', 'compose_post_service')
+generate code for: nginx_web_server request: COMPOSE
+nginx_web_server (serv nginx_web_server) sends to compose_post_service
+edge:  ('compose_post_service', 'compose_post_service_')
+Nodes and their attributes:
+unique_id_service: {'serv': 'unique_id_service', 'label': 'unique_id_service dur: 12', 'id': 'unique_id_service', 'dur': 12}
+compose_post_service_: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 138', 'id': 'compose_post_service_', 'dur': 138, 'seen': True}
+
+edge:  ('compose_post_service_', 'unique_id_service')
+generate code for: compose_post_service_ request: COMPOSE_0
+compose_post_service_ (serv compose_post_service) sends to unique_id_service
+add break to compose_post_service
+add break to unique_id_service
+Nodes and their attributes:
+media_service: {'serv': 'media_service', 'label': 'media_service dur: 6', 'id': 'media_service', 'dur': 6}
+compose_post_service__: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 140', 'id': 'compose_post_service__', 'dur': 140, 'seen': True}
+
+edge:  ('compose_post_service__', 'media_service')
+generate code for: compose_post_service__ request: COMPOSE_1
+compose_post_service__ (serv compose_post_service) sends to media_service
+add break to compose_post_service
+add break to media_service
+Nodes and their attributes:
+compose_post_service___: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 135', 'id': 'compose_post_service___', 'dur': 135, 'seen': True}
+user_service: {'serv': 'user_service', 'label': 'user_service dur: 5', 'id': 'user_service', 'dur': 5}
+
+edge:  ('compose_post_service___', 'user_service')
+generate code for: compose_post_service___ request: COMPOSE_2
+compose_post_service___ (serv compose_post_service) sends to user_service
+add break to compose_post_service
+add break to user_service
+Nodes and their attributes:
+user_mention_service: {'serv': 'user_mention_service', 'label': 'user_mention_service dur: 934', 'id': 'user_mention_service', 'dur': 934}
+url_shorten_service: {'serv': 'url_shorten_service', 'label': 'url_shorten_service dur: 555', 'id': 'url_shorten_service', 'dur': 555}
+text_service_: {'serv': 'text_service', 'label': 'text_service dur: 146', 'id': 'text_service_', 'dur': 146}
+compose_post_service____: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 147', 'id': 'compose_post_service____', 'dur': 147, 'seen': True}
+text_service: {'serv': 'text_service', 'label': 'text_service dur: 646', 'id': 'text_service', 'dur': 646}
+
+edge:  ('compose_post_service____', 'text_service')
+generate code for: compose_post_service____ request: COMPOSE_3
+compose_post_service____ (serv compose_post_service) sends to text_service
+edge:  ('text_service', 'user_mention_service')
+generate code for: text_service request: COMPOSE_3
+text_service (serv text_service) sends to user_mention_service
+edge:  ('user_mention_service', 'text_service_')
+generate code for: user_mention_service request: COMPOSE_3
+user_mention_service (serv user_mention_service) sends to text_service_
+edge:  ('text_service_', 'url_shorten_service')
+generate code for: text_service_ request: COMPOSE_3
+text_service_ (serv text_service) sends to url_shorten_service
+add break to compose_post_service
+add break to text_service
+add break to user_mention_service
+add break to url_shorten_service
+Nodes and their attributes:
+home_timeline_service: {'serv': 'home_timeline_service', 'label': 'home_timeline_service dur: 243', 'id': 'home_timeline_service', 'dur': 243}
+compose_post_service_____: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 138', 'id': 'compose_post_service_____', 'dur': 138, 'seen': True}
+home_timeline_service_: {'serv': 'home_timeline_service', 'label': 'home_timeline_service dur: 7', 'id': 'home_timeline_service_', 'dur': 7}
+social_graph_service: {'serv': 'social_graph_service', 'label': 'social_graph_service dur: 707', 'id': 'social_graph_service', 'dur': 707}
+
+edge:  ('compose_post_service_____', 'home_timeline_service')
+generate code for: compose_post_service_____ request: COMPOSE_4
+compose_post_service_____ (serv compose_post_service) sends to home_timeline_service
+edge:  ('home_timeline_service', 'social_graph_service')
+generate code for: home_timeline_service request: COMPOSE_4
+home_timeline_service (serv home_timeline_service) sends to social_graph_service
+edge:  ('social_graph_service', 'home_timeline_service_')
+generate code for: social_graph_service request: COMPOSE_4
+social_graph_service (serv social_graph_service) sends to home_timeline_service_
+add break to compose_post_service
+add break to home_timeline_service
+add break to social_graph_service
+Nodes and their attributes:
+user_timeline_service: {'serv': 'user_timeline_service', 'label': 'user_timeline_service dur: 913', 'id': 'user_timeline_service', 'dur': 913}
+compose_post_service______: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 192', 'id': 'compose_post_service______', 'dur': 192, 'seen': True}
+
+edge:  ('compose_post_service______', 'user_timeline_service')
+generate code for: compose_post_service______ request: COMPOSE_5
+compose_post_service______ (serv compose_post_service) sends to user_timeline_service
+add break to compose_post_service
+add break to user_timeline_service
+Nodes and their attributes:
+post_storage_service: {'serv': 'post_storage_service', 'label': 'post_storage_service dur: 391', 'id': 'post_storage_service', 'dur': 391}
+compose_post_service_______: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 508', 'id': 'compose_post_service_______', 'dur': 508, 'seen': True}
+
+edge:  ('compose_post_service_______', 'post_storage_service')
+generate code for: compose_post_service_______ request: COMPOSE_6
+compose_post_service_______ (serv compose_post_service) sends to post_storage_service
+add break to compose_post_service
+add break to post_storage_service
+fetch pr code for request COMPOSE
+1 : ['compose_post_service']
+7 : ['compose_post_service_', 'compose_post_service__', 'compose_post_service___', 'compose_post_service____', 'compose_post_service_____', 'compose_post_service______', 'compose_post_service_______']
+Nodes and their attributes:
+unique_id_service: {'serv': 'unique_id_service', 'label': 'unique_id_service dur: 12', 'id': 'unique_id_service', 'dur': 12}
+compose_post_service_: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 138', 'id': 'compose_post_service_', 'dur': 138, 'seen': True}
+1 : ['unique_id_service']
+add break to compose_post_service
+add break to unique_id_service
+Nodes and their attributes:
+media_service: {'serv': 'media_service', 'label': 'media_service dur: 6', 'id': 'media_service', 'dur': 6}
+compose_post_service__: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 140', 'id': 'compose_post_service__', 'dur': 140, 'seen': True}
+1 : ['media_service']
+add break to compose_post_service
+add break to media_service
+Nodes and their attributes:
+compose_post_service___: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 135', 'id': 'compose_post_service___', 'dur': 135, 'seen': True}
+user_service: {'serv': 'user_service', 'label': 'user_service dur: 5', 'id': 'user_service', 'dur': 5}
+1 : ['user_service']
+add break to compose_post_service
+add break to user_service
+Nodes and their attributes:
+user_mention_service: {'serv': 'user_mention_service', 'label': 'user_mention_service dur: 934', 'id': 'user_mention_service', 'dur': 934}
+url_shorten_service: {'serv': 'url_shorten_service', 'label': 'url_shorten_service dur: 555', 'id': 'url_shorten_service', 'dur': 555}
+text_service_: {'serv': 'text_service', 'label': 'text_service dur: 146', 'id': 'text_service_', 'dur': 146}
+compose_post_service____: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 147', 'id': 'compose_post_service____', 'dur': 147, 'seen': True}
+text_service: {'serv': 'text_service', 'label': 'text_service dur: 646', 'id': 'text_service', 'dur': 646}
+1 : ['text_service']
+1 : ['user_mention_service']
+1 : ['text_service_']
+1 : ['url_shorten_service']
+add break to compose_post_service
+add break to text_service
+add break to user_mention_service
+add break to url_shorten_service
+Nodes and their attributes:
+home_timeline_service: {'serv': 'home_timeline_service', 'label': 'home_timeline_service dur: 243', 'id': 'home_timeline_service', 'dur': 243}
+compose_post_service_____: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 138', 'id': 'compose_post_service_____', 'dur': 138, 'seen': True}
+home_timeline_service_: {'serv': 'home_timeline_service', 'label': 'home_timeline_service dur: 7', 'id': 'home_timeline_service_', 'dur': 7}
+social_graph_service: {'serv': 'social_graph_service', 'label': 'social_graph_service dur: 707', 'id': 'social_graph_service', 'dur': 707}
+1 : ['home_timeline_service']
+1 : ['social_graph_service']
+1 : ['home_timeline_service_']
+add break to compose_post_service
+add break to home_timeline_service
+add break to social_graph_service
+Nodes and their attributes:
+user_timeline_service: {'serv': 'user_timeline_service', 'label': 'user_timeline_service dur: 913', 'id': 'user_timeline_service', 'dur': 913}
+compose_post_service______: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 192', 'id': 'compose_post_service______', 'dur': 192, 'seen': True}
+1 : ['user_timeline_service']
+add break to compose_post_service
+add break to user_timeline_service
+Nodes and their attributes:
+post_storage_service: {'serv': 'post_storage_service', 'label': 'post_storage_service dur: 391', 'id': 'post_storage_service', 'dur': 391}
+compose_post_service_______: {'serv': 'compose_post_service', 'label': 'compose_post_service dur: 508', 'id': 'compose_post_service_______', 'dur': 508, 'seen': True}
+1 : ['post_storage_service']
+add break to compose_post_service
+add break to post_storage_service
+Do you want to add output sizes for request COMPOSE from a size file? (Otherwise use default value: 100 bytes) [y/N] 
+Using default size 100 for all messages
+{}
+COMPOSE <-> COMPOSE
+COMPOSE <-> COMPOSE
+COMPOSE <-> COMPOSE
+COMPOSE <-> COMPOSE
+COMPOSE <-> COMPOSE
+COMPOSE <-> COMPOSE
+COMPOSE <-> COMPOSE
+COMPOSE <-> COMPOSE
+compose_post_service not in d, use default
+unique_id_service not in d, use default
+media_service not in d, use default
+user_service not in d, use default
+text_service not in d, use default
+user_mention_service not in d, use default
+url_shorten_service not in d, use default
+home_timeline_service not in d, use default
+social_graph_service not in d, use default
+user_timeline_service not in d, use default
+post_storage_service not in d, use default
+compose_post_service not in d, use default
+unique_id_service not in d, use default
+media_service not in d, use default
+user_service not in d, use default
+text_service not in d, use default
+user_mention_service not in d, use default
+url_shorten_service not in d, use default
+home_timeline_service not in d, use default
+social_graph_service not in d, use default
+user_timeline_service not in d, use default
+post_storage_service not in d, use default
+compose_post_service not in d, use default
+unique_id_service not in d, use default
+media_service not in d, use default
+user_service not in d, use default
+text_service not in d, use default
+user_mention_service not in d, use default
+url_shorten_service not in d, use default
+home_timeline_service not in d, use default
+social_graph_service not in d, use default
+user_timeline_service not in d, use default
+post_storage_service not in d, use default
+compose_post_service not in d, use default
+unique_id_service not in d, use default
+media_service not in d, use default
+user_service not in d, use default
+text_service not in d, use default
+user_mention_service not in d, use default
+url_shorten_service not in d, use default
+home_timeline_service not in d, use default
+social_graph_service not in d, use default
+user_timeline_service not in d, use default
+post_storage_service not in d, use default
+compose_post_service not in d, use default
+unique_id_service not in d, use default
+media_service not in d, use default
+user_service not in d, use default
+text_service not in d, use default
+user_mention_service not in d, use default
+url_shorten_service not in d, use default
+home_timeline_service not in d, use default
+social_graph_service not in d, use default
+user_timeline_service not in d, use default
+post_storage_service not in d, use default
+compose_post_service not in d, use default
+unique_id_service not in d, use default
+media_service not in d, use default
+user_service not in d, use default
+text_service not in d, use default
+user_mention_service not in d, use default
+url_shorten_service not in d, use default
+home_timeline_service not in d, use default
+social_graph_service not in d, use default
+user_timeline_service not in d, use default
+post_storage_service not in d, use default
+compose_post_service not in d, use default
+unique_id_service not in d, use default
+media_service not in d, use default
+user_service not in d, use default
+text_service not in d, use default
+user_mention_service not in d, use default
+url_shorten_service not in d, use default
+home_timeline_service not in d, use default
+social_graph_service not in d, use default
+user_timeline_service not in d, use default
+post_storage_service not in d, use default
+compose_post_service not in d, use default
+unique_id_service not in d, use default
+media_service not in d, use default
+user_service not in d, use default
+text_service not in d, use default
+user_mention_service not in d, use default
+url_shorten_service not in d, use default
+home_timeline_service not in d, use default
+social_graph_service not in d, use default
+user_timeline_service not in d, use default
+post_storage_service not in d, use default
+Give a name for the service config file:configGen.csv
+12 different services
+Generate constructor for service nginx_web_server
+Generate constructor for service compose_post_service
+Generate constructor for service unique_id_service
+Generate constructor for service media_service
+Generate constructor for service user_service
+Generate constructor for service text_service
+Generate constructor for service user_mention_service
+Generate constructor for service url_shorten_service
+Generate constructor for service home_timeline_service
+Generate constructor for service social_graph_service
+Generate constructor for service user_timeline_service
+Generate constructor for service post_storage_service
+=--------------------------------------------------=
+Code generated successfully to 'codeProduced.cpp'
+You now need to add your dataSources to the simulation code before running it!
+    #+END_SRC
+
+    You can observe we use some default network packet sizes in this
+    experiment. This is cause by the fact that in this setup, network isn't the
+    bottleneck, what we want to study is the CPU bottleneck of the resources we
+    study. If you wanted to study networking issues in a constrained setup, you
+    can provide a csv file with the network sizes of the request coming and
+    going of each request that would be used with SimGrid.
+
+    You can also observe that for the nodes that have multiple childs in the
+    trace graph, the user is asked whether the children should be executed in
+    parallel or sequentially. We do not do this automatically because we do not
+    have the exact information contained in our trace graph. The goal of this is
+    to allow a more fine modeling of the end-to-end latency of single requests
+    by ordering correctly sub-executions, but whatever your choices, the overall
+    amount of cpu execution will stay the same.
+
+    In the end, you obtain a cpp file along with the configuration file required
+    to launch the experiment.
+
+*** Adding logs and dataSources to the simulation code
+
+    The code generated during the previous step requires a small intervention of
+    the user to run. There are 2 things to do:
+    - Adding some additional logs if you want to: There are some default debug
+      logs that can be activated. To cound the exact number of requests executed
+      during an experiment and their latency (what we take into account in our
+      results), we add a log line in the output of post_storage_service 
+
+      #+BEGIN_SRC c++
+XBT_INFO("FINISHED REQUEST at ts %lf arr: %lf dur: %lf", simgrid::s4u::Engine::get_clock(), td->firstArrivalDate, simgrid::s4u::Engine::get_clock()-td->firstArrivalDate);
+      #+END_SRC
+
+      This code simply prints the timestamp of creation of the request, and its
+      finished execution timestamp. We use it later to create our data files
+      from execution logs.
+
+    - Adding datasources: DataSources are the objects responsible for sending
+      and receiving requests to the application. In this work we use constant
+      rate datasource that will send N requests per second. You can add them
+      after the comment "/* ADD DATASOURCES MANUALLY HERE, SET THE END TIMER AS YOU WISH, AND LAUNCH YOUR SIMULATOR*/"
+
+      #+BEGIN_SRC c++
+	/* ADD DATASOURCES MANUALLY HERE, SET THE END TIMER AS YOU WISH, AND LAUNCH YOUR SIMULATOR*/
+	DataSourceFixedInterval* dsf = new DataSourceFixedInterval("nginx_web_server",RequestType::COMPOSE, 1/freq,100);
+	simgrid::s4u::ActorPtr dataS = simgrid::s4u::Actor::create("snd", simgrid::s4u::Host::by_name("clemth.irisa.fr"), [&]{dsf->run();});
+      #+END_SRC
+
+      Don't forget to kill the dataSource once your experiment is finished,
+      example:
+      #+BEGIN_SRC c++
+	// kill policies and ETMs
+	simgrid::s4u::this_actor::sleep_for(30); /*set it according to your needs*/
+	XBT_INFO("Done. Killing policies and etms");
+	dataS->kill();
+      #+END_SRC
+
+      Here the experiment lasts for 30 seconds, after which we kill the
+      dataSource. 
+
+    The code can now be compiled and run to perform performance predictions of
+    the application as we do in the next step!
+    
+** Step 3: Comparison SimGrid predictions and Real World observations
+
+   We are now able to predict the performance of the application using
+   SimGrid. In this step, we detail our procedure to compare the predictions
+   obtained with SimGrid against real world executions.
+   1. Launch SimGrid simulations and obtain performance prediction results
+   2. Launch DeathStarBench's socialnetwork in the 2 configurations: 1 node, and
+      2 nodes
+   3. Compare output values
+   
+*** Launching SimGrid simulation
+
+    To launch the simulations on SimGrid, copy these files in the directory of
+    your executable program (build/examples if you compiled
+    this repository) and launch the following script for each configuration:
+    [[./resources/launchBenchs_dsb_1node.sh]],
+    [[./resources/launchBenchs_dsb_2node.sh]], and
+    [[./resources/launchBenchs_dsb_2.1node.sh]]
+    Modify it if you created your own simulator, otherwise, it will run the
+    generated code with the trace that we presented earlier.
+
+    You can modify the scripts to your convenience, you can modify the
+    configuration files in the internship_simgrid directory (see the
+    files in config_files/{configServices-platforms})
+
+    Then, to launcthe experiment, just run the scripts, and wait for the
+    results. It can be experienced that once the application gets congested
+    (~1600 for the 1 node configuration), you will have long execution times of
+    your simulation (~30 minutes for the last measurement) due to large queueing
+    of requests. The performance until the congestion point should be faster or
+    similar to the real execution time (~30 seconds).
+ 
+*** Launching DeathStarBench socialnetwork with 2 configurations
+    To launch the experiments, we used grid5000, on the paravance cluster (see
+    [[https://www.grid5000.fr/w/Hardware]] for hardware details). However, you can
+    do it with any 3 connected computing nodes with sufficient network capacity
+    to send and receives the request without a network bottleneck. Your nodes
+    need to be configured in a swarm. 
+
+    We proceed in 2 steps: first we set the location constraints in the
+    docker-compose files, second we launch the experiment and gather our
+    results.
+
+**** Generating docker-compose files
+     We evaluate the application on 3 configurations:
+     - configuration 1: 1 node executes the services included in the execution
+       of the compose request, the other node executes the other services so
+       that it does not affect the performance of our benchmark.
+       To do so, take the file [[./resources/awkfile_1.awk]] and set the hostname of
+       your node that will execute the services. Then, use this file on the
+       template in [[./resources/docker_compose_2.yml]] to generate the
+       docker-compose file to launch the experiment.
+
+       #+BEGIN_SRC sh
+       awk -f awkfile_1.awk docker_compose_2.yml > docker_compose_1_launchable.yml
+       #+END_SRC
+     - configuration 2.a: we have 2 nodes each executing 6 of the services
+       included in the execution of the compose request, and the third node
+       executes the other services.
+       To do so, same procedure as with the first configuration. Modify
+       [[./resources/awkfile_2.awk]] with the hostname of the two nodes that will
+       executes the services, and generate the docker-compose with
+       #+BEGIN_SRC sh
+       awk -f awkfile_2.awk docker_compose_2.yml > docker_compose_2_launchable.yml
+       #+END_SRC
+     - configuration 2.b: Same as 2.a but with different groups of services.
+       To do so, same procedure as with the first configuration. Modify
+       [[./resources/awkfile_2.awk]] with the hostname of the two nodes that will
+       executes the services, and generate the docker-compose with
+       #+BEGIN_SRC sh
+       awk -f awkfile_2.awk docker_compose_2.1.yml > docker_compose_2.1_launchable.yml
+       #+END_SRC
+
+     
+**** Launch the experiment
+
+     To launch this experiment, we used the scrips
+     [[./resources/launchBenchsG5K.sh]]
+     In this file, you can set the minmum/maximum request throughputs, the
+     amount of samples to execute and such. This file takes care of deploying
+     the application on the swarm and launch the load test.
+
+     Before running it, you might want to limit the maximum amount of cpus
+     assigned to each node (in our results for example, we set 10 cores per node
+     to execute the application). Docker-swarm is not very great at resource
+     assignment on single nodes. One trick is to modify the cgroup with:
+
+     #+BEGIN_SRC sh
+# nodes 0 to 9 are affected to execute the containers
+echo 0-9 > /sys/fs/cgroup/cpuset/docker/cpuset.cpus
+     #+END_SRC
+
+     *do this on all nodes*
+     
+     You also need to have an operational swarm. To do so, on the master node,
+     launch "docker swarm init" and paste the join command on the other 2 nodes.
+     You should be able to see if your nodes joined the swarm with a "docker
+     swarm ls" command.
+
+     Modify launchG5K.sh to set the scenario number you want (nbn to 1, 2, or
+     2.1) and the request lower and upper bounds to be tested.
+
+     You can now launch the experiment:
+
+     #+BEGIN_SRC sh
+perc=100 bash launchG5K.sh
+     #+END_SRC
+
+     And wait until the end. The results should be found in "res/resTot.csv"
+*** Comparison
+
+    The comparison between the output csv of simgrid and real world values are
+    analyzed using an R notebook, see: [[https://github.com/klementc/calvin-microbenchmarks/blob/main/comparison/Comparison%20dsb.ipynb]]

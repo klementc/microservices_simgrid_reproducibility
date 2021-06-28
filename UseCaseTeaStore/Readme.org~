@@ -1,0 +1,159 @@
+* Reproducing TeaStore results
+
+  This notebook describes the different steps we used to obtain our results. One
+  should be able to follow those steps to reproduce them. We describe:
+
+  - The code and software required to run the experiment
+  - The files and code we used in our use case
+  - The sequence of commands to produce our results
+
+** Software requirements
+
+   This experiment is done thanks to the TeaStore application and its
+   benchmarking tools proposed on [[https://github.com/DescartesResearch]], with a
+   few modifications we made to obtain our results.
+
+   - Clone the TeaStore application
+     #+BEGIN_SRC sh
+git clone https://github.com/DescartesResearch/TeaStore
+     #+END_SRC
+   - To load test the application, we use the HTTP-load-Generator from
+     [[https://github.com/joakimkistowski]], as recommended in TeaStore's
+     documentation
+     #+BEGIN_SRC sh
+# repository at https://github.com/joakimkistowski/HTTP-Load-Generator, below just download the jar file, you need java11
+wget https://gitlab2.informatik.uni-wuerzburg.de/descartes/httploadgenerator/raw/master/httploadgenerator.jar
+     #+END_SRC
+   - launcher in [[./resources/launchTS.sh]]
+   - load profile with only the login request at
+     [[./resources/teastore_browse_2.lua]] (the default one has more request types,
+     but for easily comparable results, we study a single request types in our
+     validation results)
+     #+BEGIN_SRC sh
+mv ./resources/teastore_browse_2.lua TeaStore/examples/httploadgenerator/
+     #+END_SRC
+
+** Launch calibration and SimGrid code generation
+
+   TeaStore has tracing features by using kieker
+   ([[https://kieker-monitoring.net/]]). To transpose the code of the LOGIN request
+   of teastore into a simgrid simulator, we:
+   - execute calibration requests on the application
+   - fetch some information about the request execution using kieker
+   - transform the output to fit our code generator format
+   
+*** Execute calibration requests
+
+    First, start the application with no resource restrictions. To do so, execute:
+    #+BEGIN_SRC
+    docker-compose -f ./examples/docker/docker-compose_kieker.yaml up -d
+    docker ps # should show you that all services are up and running
+    #+END_SRC
+
+    Then, launch a load with the low intensity profile, so as to not overload
+    the application. To do so, you need to launch 2 programs on the load
+    generator node.
+    - Launch the generator
+      #+BEGIN_SRC
+java -jar httploadgenerator.jar loadgenerator
+      #+END_SRC
+    - Load the profile
+      #+BEGIN_SRC
+java -jar httploadgenerator.jar director -a examples/httploadgenerator/increasingLowIntensity.csv -l examples/httploadgenerator/teastore_browse_2.lua -o calibrationOut.csv -t 64
+      #+END_SRC
+
+      After executing the requests, using kieker tools, we obtain an output
+      trace similar to the following:
+
+      [[./resources/kiekerraw.png]]
+
+      When using kieker, we did not manage to get a simple trace with execution
+      times in each service as obtained with jaeger. Single request traces do
+      not output execution time information. Because our goal was not to spend
+      much time working on kieker to obtain exactly the kind of trace we wanted,
+      we decide to manually process the trace to be used by our code generator
+      by taking the information from the previous image (we want to show that
+      starting from an application that we have no information about, but which
+      provide some information through tracing, we can easily and without much
+      effort build a simulator) 
+
+      To do so we analyze the graph of function calls invoked during the login
+      request, group all consecutive function calls in the graph that lie in the
+      same microservice as a single call with a duration equal to the sum of
+      individual durations. In the end, we obtain the following structure:
+
+      [[./resources/teaStore_LOGIN.png]]
+
+      The dot file associated to it is in [[./resources/teaStore_LOGIN.dot]], and to
+      each node we attach the execution time in ms.
+
+      Once we have this graph, we can call it with our script and generate the
+      simulation code to be executed.
+
+      #+BEGIN_SRC 
+python graphReader.py -i
+      #+END_SRC
+    
+      The output code we obtain is located in
+      [[https://github.com/klementc/internship_simgrid/blob/master/examples/teastore_login.cpp]]
+      ready to be compiled and executed.
+
+      **note that the code has been modified due to memory issues when exporting
+      jaeger traces from the simulator, we removed this feature in the code of
+      this experiment because it does not cause problems for generating our
+      results. The development of our tool is still ongoing, and features like
+      jaeger exports is not perfectly implemented as of now**
+
+** Launch the experiment
+
+*** Launch the simulations
+
+    We provide a script at [[./resources/launchTS.sh]] that we used to run the
+    experiments.
+    If you use the file from
+    https://github.com/klementc/internship_simgrid/blob/master/examples/teastore_login.cpp,
+    you compiled it during the installation of our tool. Just go to your example
+    build directory, copy [[./resources/benchteastore.sh]] and
+    [[./resources/teastore.awk]] , and start the execution of the script (modify the
+    core amount and min/max loads to fit the configurations used in the paper,
+    by default it is the 24 core configuration). The results can then be found
+    in the file "teastore.csv".
+
+*** Launch on G5K
+    As with the other experiments, we used Grid5000 to execute the
+    benchmark. Here we reserve 2 nodes: 1 will execute the application, 1 will
+    generate the load and send it to the application. We used nodes from the paravance cluster (see
+     [[https://www.grid5000.fr/w/Hardware]] for hardware details).
+
+
+     The execution is straightforward.
+
+     1. Deploy the application on your first node.
+	Before running it, you can, as we did in our results, limit the resources
+	assigned to docker for the experiment by setting the cpuset to use
+	#+BEGIN_SRC sh
+ # nodes 0 to 15 are affected to execute the containers, 16 cores overall
+ echo 0-15 > /sys/fs/cgroup/cpuset/docker/cpuset.cpus
+ # From the root of the TeaStore repository
+ docker-compose -f ./examples/docker/docker-compose_kieker.yaml up -d
+	#+END_SRC
+       
+     2. On your second node, modify "teastore_browse_2.lua" and set the
+	destination to the adress of your first node. For example if the running
+	node is paravance-15: 
+	#+BEGIN_SRC
+ prefix = "http://paravance-15:8080/tools.descartes.teastore.webui/"
+	#+END_SRC
+
+     3. Launch the load generator: bash launchTS.sh (you can modify the amount of
+	threads and cores to use).
+
+	#+BEGIN_SRC
+ bash launchTS.sh
+	#+END_SRC
+       
+	Once finished, the results should be located in
+	"examples/httploadgenerator/". For our visualizations, we simply fused all the
+	csv files produced as a single data file, adding fields for the amount of
+	cpu resources assigned for each sample, and the sample number (we ran 20
+	samples for each configuration).

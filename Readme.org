@@ -1,0 +1,63 @@
+* Microservice model within SimGrid experiments
+
+This repository contains the code, scripts and visualizations made for our
+microservice simulation paper. It can be seen as a snapshot of
+[[https://github.com/klementc/internship_simgrid]], the repository used to develop
+our microservice model, and [[https://github.com/klementc/calvin-microbenchmarks]]
+used to perform some experiments. 
+
+Using this repository, it is possible to reproduce our simulated results by
+simply compiling the simulation model and the simulators used in the paper. We
+also give some documentation files on how to reproduce our real-world
+experimental results (different hardware than the hardware we used leading to
+different real-world values).
+
+Below can be found a description of the files available in this repository and
+used in each of our experiments.
+
+* Step-1: Building the Simulators
+
+The code we used for our validation is available in this repository. To
+reproduce our simulated results, you just need to build the simulator model and
+the examples before running them using the benchmark scripts we provide.
+
+The code of our microservice model can be found in [[./Elasticity]], and the code of
+the simulators in [[./example]].
+
+Our simulators are able to export simulated traces to Jaeger thanks to an
+opentracing instrumentation. To use this feature you need
+https://github.com/jaegertracing/jaeger-client-cpp.
+
+#+BEGIN_SRC sh
+# build the simulator and the examples
+mkdir build && cd build
+cmake ..
+make -j8
+#+END_SRC
+
+Once compiled, executable examples can be executed under [[./build/examples]], and
+you can use the model to code your own microservice applications.
+
+* Step-2: Reproduce Microbenchmarks Results
+
+  - [[./microbenchmarks]] : readme with information to reproduce the results
+  - [[./rabbitmqGo]] : code of the microservice application we developped for the
+    microbenchmarks as well as execution scripts used
+  - [[./comparison/Comparison_analysis_scenario1.ipynb]],
+    [[./comparison/Comparison_analysis_scenario2.ipynb]],
+    [[./comparison/Comparison_analysis_scenario3.ipynb]],
+    [[./comparison/Comparison_analysis_scenario4.ipynb]], Notebooks with
+    visualizations of our data and calibration procedures (you can reuse those
+    notebooks with your own data)
+ 
+* Step-3: Reproduce TeaStore Results
+
+  - [[./UseCaseTeaStore/Readme.org]] : readme with information on how to reproduce
+    the results
+  - [[./UseCaseTeaStore/resources]] : resource files used for the experiment (and
+    execution trace used in the calibration)
+
+* Step-4: Reproduce Social Network Results
+
+  - [[./UseCaseDeathStarBench/Readme.org]] : readme with information on how to reproduce
+  - [[./UseCaseDeathStarBench/resources/]] : resource files used for the experiments

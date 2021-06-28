@@ -1,0 +1,108 @@
+strict digraph "" {
+	graph [rankdir=LR];
+	node [label="\N"];
+	nginx_web_server	[dur=783,
+		id=nginx_web_server,
+		label="nginx_web_server dur: 783",
+		serv=nginx_web_server];
+	compose_post_service	[dur=682,
+		id=compose_post_service,
+		label="compose_post_service dur: 682",
+		serv=compose_post_service];
+	nginx_web_server -> compose_post_service;
+	unique_id_service	[dur=12,
+		id=unique_id_service,
+		label="unique_id_service dur: 12",
+		serv=unique_id_service];
+	compose_post_service -> unique_id_service;
+	compose_post_service_	[dur=140,
+		id=compose_post_service_,
+		label="compose_post_service dur: 140",
+		serv=compose_post_service];
+	unique_id_service -> compose_post_service_;
+	media_service	[dur=6,
+		id=media_service,
+		label="media_service dur: 6",
+		serv=media_service];
+	compose_post_service_ -> media_service;
+	compose_post_service__	[dur=135,
+		id=compose_post_service__,
+		label="compose_post_service dur: 135",
+		serv=compose_post_service];
+	media_service -> compose_post_service__;
+	user_service	[dur=5,
+		id=user_service,
+		label="user_service dur: 5",
+		serv=user_service];
+	compose_post_service__ -> user_service;
+	compose_post_service___	[dur=147,
+		id=compose_post_service___,
+		label="compose_post_service dur: 147",
+		serv=compose_post_service];
+	user_service -> compose_post_service___;
+	text_service	[dur=296,
+		id=text_service,
+		label="text_service dur: 296",
+		serv=text_service];
+	compose_post_service___ -> text_service;
+	text_service_	[dur=350,
+		id=text_service_,
+		label="text_service dur: 350",
+		serv=text_service];
+	text_service -> text_service_;
+	text_service__	[dur=146,
+		id=text_service__,
+		label="text_service dur: 146",
+		serv=text_service];
+	text_service -> text_service__;
+	user_mention_service	[dur=934,
+		id=user_mention_service,
+		label="user_mention_service dur: 934",
+		serv=user_mention_service];
+	text_service_ -> user_mention_service;
+	compose_post_service____	[dur=138,
+		id=compose_post_service____,
+		label="compose_post_service dur: 138",
+		serv=compose_post_service];
+	user_mention_service -> compose_post_service____;
+	home_timeline_service	[dur=243,
+		id=home_timeline_service,
+		label="home_timeline_service dur: 243",
+		serv=home_timeline_service];
+	compose_post_service____ -> home_timeline_service;
+	social_graph_service	[dur=707,
+		id=social_graph_service,
+		label="social_graph_service dur: 707",
+		serv=social_graph_service];
+	home_timeline_service -> social_graph_service;
+	home_timeline_service_	[dur=7,
+		id=home_timeline_service_,
+		label="home_timeline_service dur: 7",
+		serv=home_timeline_service];
+	social_graph_service -> home_timeline_service_;
+	compose_post_service_____	[dur=192,
+		id=compose_post_service_____,
+		label="compose_post_service dur: 192",
+		serv=compose_post_service];
+	home_timeline_service_ -> compose_post_service_____;
+	user_timeline_service	[dur=913,
+		id=user_timeline_service,
+		label="user_timeline_service dur: 913",
+		serv=user_timeline_service];
+	compose_post_service_____ -> user_timeline_service;
+	compose_post_service______	[dur=508,
+		id=compose_post_service______,
+		label="compose_post_service dur: 508",
+		serv=compose_post_service];
+	user_timeline_service -> compose_post_service______;
+	post_storage_service	[dur=391,
+		id=post_storage_service,
+		label="post_storage_service dur: 391",
+		serv=post_storage_service];
+	compose_post_service______ -> post_storage_service;
+	url_shorten_service	[dur=555,
+		id=url_shorten_service,
+		label="url_shorten_service dur: 555",
+		serv=url_shorten_service];
+	text_service__ -> url_shorten_service;
+}

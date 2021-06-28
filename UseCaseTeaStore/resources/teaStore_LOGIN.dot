@@ -1,0 +1,78 @@
+strict digraph "" {
+	graph [rankdir=LR];
+	node [label="\N"];
+
+  LOGIN_1 [dur=7043,
+    id=LOGIN_1,
+    label="servA",
+    serv=servA];
+
+  LOGIN_1_1 [dur=57,
+    id=LOGIN_1_1,
+    label="servB",
+    serv=servB];
+
+  LOGIN_1_2 [dur=189,
+    id=LOGIN_1_2,
+    label="servD",
+    serv=servD];
+
+  LOGIN_1_3 [dur=542,
+    id=LOGIN_1_3,
+    label="servC",
+    serv=servC];
+
+
+  LOGIN_1 -> LOGIN_1_1;
+  LOGIN_1 -> LOGIN_1_2;
+  LOGIN_1 -> LOGIN_1_3;
+
+
+  LOGIN_2 [dur=13891,
+    id=LOGIN_2,
+    label="servA2",
+    serv=servA];
+
+  LOGIN_2_1 [dur=6073,
+    id=LOGIN_2_1,
+    label="servC2",
+    serv=servC];
+
+  LOGIN_2_1_1 [dur=4985,
+    id=LOGIN_2_1_1,
+    label="servC2",
+    serv=servC];
+
+  LOGIN_2_1_2 [dur=828,
+    id=LOGIN_2_1_2,
+    label="servA2",
+    serv=servA];
+
+  LOGIN_2_1_2_1 [dur=408,
+    id=LOGIN_2_1_2_1,
+    label="servD2",
+    serv=servD];
+
+
+  LOGIN_2 -> LOGIN_2_1
+  LOGIN_2_1 -> LOGIN_2_1_1
+  LOGIN_2_1 -> LOGIN_2_1_2
+  LOGIN_2_1_2 -> LOGIN_2_1_2_1
+
+
+  LOGIN_2_1_3 [dur=443,
+    id=LOGIN_2_1_3,
+    label="servC2",
+    serv=servC];
+
+  LOGIN_2_1 -> LOGIN_2_1_3
+
+
+  INPUT [dur=0,
+    id=REQ,
+    label="REQ",
+    serv=SREQ];
+
+  INPUT -> LOGIN_1
+  INPUT -> LOGIN_2
+}

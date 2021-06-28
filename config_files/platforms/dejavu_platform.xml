@@ -1,0 +1,9 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+
+  <zone id="AS0" routing="Full">
+    <cluster id="server1_cb1" prefix="cb1-" suffix="" radical="1-400" speed="1Gf" core="1" bw="1000GBps"
+             lat="0us"/>
+  </zone>
+</platform>

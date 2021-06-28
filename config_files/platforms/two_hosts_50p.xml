@@ -1,0 +1,15 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+  <zone id="world" routing="Full">
+    <!-- The resources -->
+    <host id="clemth.irisa.fr" speed="500Mf"/>
+    <host id="clempc" speed="500Mf"/>
+    <link id="1" bandwidth="125GBps" latency="0us"/>
+
+    <!-- The routing between resources -->
+    <route src="clemth.irisa.fr" dst="clempc">
+      <link_ctn id="1"/>
+    </route>
+  </zone>
+</platform>

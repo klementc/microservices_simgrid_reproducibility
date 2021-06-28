@@ -1,0 +1,49 @@
+Running 30s test @ http://192.168.1.74:8080/wrk2-api/post/compose
+  1 threads and 1 connections
+  Thread calibration: mean lat.: 18.353ms, rate sampling interval: 44ms
+  Thread Stats   Avg      Stdev     99%   +/- Stdev
+    Latency    11.63ms    5.16ms  19.17ms   53.33%
+    Req/Sec     0.74      4.28    22.00     96.90%
+  Latency Distribution (HdrHistogram - Recorded Latency)
+ 50.000%    9.47ms
+ 75.000%   17.50ms
+ 90.000%   19.12ms
+ 99.000%   19.17ms
+ 99.900%   19.17ms
+ 99.990%   19.17ms
+ 99.999%   19.17ms
+100.000%   19.17ms
+
+  Detailed Percentile spectrum:
+       Value   Percentile   TotalCount 1/(1-Percentile)
+
+       4.843     0.000000            1         1.00
+       4.947     0.100000            2         1.11
+       6.803     0.200000            3         1.25
+       8.807     0.300000            5         1.43
+       8.999     0.400000            6         1.67
+       9.471     0.500000            8         2.00
+       9.719     0.550000            9         2.22
+       9.719     0.600000            9         2.50
+      11.711     0.650000           10         2.86
+      17.503     0.700000           11         3.33
+      18.191     0.750000           12         4.00
+      18.191     0.775000           12         4.44
+      18.191     0.800000           12         5.00
+      18.591     0.825000           13         5.71
+      18.591     0.850000           13         6.67
+      19.119     0.875000           14         8.00
+      19.119     0.887500           14         8.89
+      19.119     0.900000           14        10.00
+      19.119     0.912500           14        11.43
+      19.119     0.925000           14        13.33
+      19.167     0.937500           15        16.00
+      19.167     1.000000           15          inf
+#[Mean    =       11.633, StdDeviation   =        5.155]
+#[Max     =       19.152, Total count    =           15]
+#[Buckets =           27, SubBuckets     =         2048]
+----------------------------------------------------------
+  32 requests in 30.00s, 6.72KB read
+  Socket errors: connect 0, read 0, write 0, timeout 1
+Requests/sec:      1.07
+Transfer/sec:     229.31B

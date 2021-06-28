@@ -1,0 +1,28 @@
+#    -*- mode: org -*-
+
+
+Archived entries from file /home/clem/Code/github.com/klementc/calvin-microbenchmarks/UseCaseDeathStarBench/Readme.org
+
+
+* Generating docker-compose files
+  :PROPERTIES:
+  :ARCHIVE_TIME: 2021-06-07 Mon 16:32
+  :ARCHIVE_FILE: ~/Code/github.com/klementc/calvin-microbenchmarks/UseCaseDeathStarBench/Readme.org
+  :ARCHIVE_OLPATH: Reproducing DeathStarBench results/Step 3: Comparison SimGrid predictions and Real World observations/Launching DeathStarBench socialnetwork with 2 configurations
+  :ARCHIVE_CATEGORY: Readme
+  :END:
+  We evaluate the application on 2 configurations:
+  - configuration 1: 1 node executes the services included in the execution
+    of the compose request, the other node executes the other services so
+    that it does not affect the performance of our benchmark.
+    To do so, take the file [[./resources/awkfile_1.awk]] and set the hostname of
+    your node that will execute the services. Then, use this file on the
+    template in [[./resources/docker_compose_2.yml]] to generate the
+    docker-compose file to launch the experiment.
+
+    #+BEGIN_SRC sh
+       
+    #+END_SRC
+  - configuration 2: we have 2 nodes each executing 6 of the services
+    included in the execution of the compose request, and the third node
+    executes the other services.

@@ -1,0 +1,91 @@
+**We recommend using an experimental testbed, the experiments launched on a
+computing node with other programs running besides your experiments might alter
+the accuracy of your observations. For those experiments, we used grid5000  [[https://www.grid5000.fr/w/Grid5000:Home]]**
+
+* Reproducing Microbenchmarks results
+
+  This notebook describes the different steps we used to obtain our results. One
+  should be able to follow those steps to reproduce them. We describe:
+
+  - The code and software required to run the experiment
+  - The files and code we used in our use case
+  - The sequence of commands to produce our results
+
+** Software requirements
+
+   To reproduce this experiment, you need to have on your machine:
+
+   - Our microservice simulation tool at
+     [[https://github.com/klementc/internship_simgrid]]
+   - The code of the go microservice application in this repository, in the
+     folder [[../rabbitmqGo]]
+  
+** Launch calibration
+
+   We do this experiment in 2 steps: first we execute a calibration: using a
+   fixed load for various work amounts in the microservice. This allows us to
+   obtain a curve showing the duration of a request given a work amount using
+   linear regression.
+
+   Build the docker container with all the scripts you need:
+   #+BEGIN_SRC 
+cd calvin-microbenchmarks/rabbitmqGo/scripts/
+docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g) -t expe/rmqgo .
+   #+END_SRC
+
+   Launch the calibration:
+   #+BEGIN_SRC
+scenario=1 parD=10 suffix=testm hostLogPath=${HOME}/logs_expe/goLogs/resCalib logDir=/logs/ tsFile=/go/src/app/timestamps/tsCal.csv start=1 end=1000000 iter=500000 nbSamples=2 durIter=360 bash launchPar.sh
+   #+END_SRC
+
+   To visualize your results, you can reuse the notebook from
+   [[../comparison/Comparison_analysis_scenario1.ipynb]]. The first half of the
+   notebook describes in details our calibration results and explains why we used a
+   linear regression.
+
+
+   Then you can compare your results to SimGrid (follow the notebook to have the
+   right work amounts):
+   #+BEGIN_SRC
+echo "ts,qArr,instArr,startEx,endEx,flops,serv" > sg_cal_scenario1.csv
+for i in 263000  3618000  6973000  10328000  13683000  17038000  20393000  23748000  27103000  30458000  33813000 
+do
+    echo "Calibration for iterAmount=$i"
+    scenario=1 parDeg=10 tsFile=../rabbitmqGo/timestamps/tsCal.csv logDir=~/logs_expe/sgLogs/calibration start=$i end=$i incr=1 bash launch.sh
+    tail -n+2 ~/logs_expe/sgLogs/calibration/results.csv >> sg_cal_scenario1.csv
+done
+    #+END_SRC
+   #+END_SRC
+
+
+** Launch the execution
+
+   We recommend to follow the indications given in the notebook at
+   [[../comparison/Comparison_analysis_scenario1.ipynb]] (scenario1 to 4 for each
+   scenario) to see the process we follow to obtain the work amounts obtained
+   for the simulated executions.
+
+*** Simgrid
+    The values in the for loop should be different if you use use your own
+    calibration dataset and do the linear regression with the values on your hardware.
+    #+BEGIN_SRC
+
+echo "ts,qArr,instArr,startEx,endEx,flops,serv" > sg_load_scenario1.csv
+for i in 263000  934000  1605000  2276000  2947000  3618000  4289000  4960000  5631000  6302000  6973000  7644000  8315000  8986000  9657000  10328000  10999000  11670000  12341000  13012000  13683000  14354000  15025000  15696000  16367000  17038000  17709000  18380000  19051000  19722000  20393000  21064000  21735000  22406000  23077000  23748000  24419000  25090000  25761000  26432000  27103000
+do
+    echo "Calibration for iterAmount=$i"
+    scenario=1 parDeg=8 tsFile=default5TimeStamps.csv logDir=~/logs_expe/sgLogs/calibration start=$i end=$i incr=1 bash launch.sh
+    tail -n+2 ~/logs_expe/sgLogs/calibration/results.csv >> sg_load_scenario1.csv
+done
+    #+END_SRC
+
+*** Real world
+
+    #+BEGIN_SRC
+scenario=1 parD=10 suffix=testm hostLogPath=${HOME}/logs_expe/goLogs/caca logDir=/logs/ tsFile=/go/src/app/timestamps/default5TimeStamps.csv start=1 end=80000001 iter=2000000 nbSamples=2 durIter=360 bash launchPar.sh
+    #+END_SRC
+
+
+*** Comparison
+
+    Execute the notebook with your values to do the comparison [[../comparison/Comparison_analysis_scenario1.ipynb]]
