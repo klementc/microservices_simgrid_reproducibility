@@ -18,7 +18,7 @@ the accuracy of your observations. For those experiments, we used grid5000  [[ht
    - Our microservice simulation tool (this repository)
    - The code of the go microservice application in this repository, in the
      folder [[../rabbitmqGo]]
-  
+
 ** Launch calibration
 
    We do this experiment in 2 steps: first we execute a calibration: using a
@@ -27,7 +27,7 @@ the accuracy of your observations. For those experiments, we used grid5000  [[ht
    linear regression.
 
    Build the docker container with all the scripts you need:
-   #+BEGIN_SRC 
+   #+BEGIN_SRC
 cd calvin-microbenchmarks/rabbitmqGo/scripts/
 docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g) -t expe/rmqgo .
    #+END_SRC
@@ -47,7 +47,7 @@ scenario=1 parD=10 suffix=testm hostLogPath=${HOME}/logs_expe/goLogs/resCalib lo
    right work amounts):
    #+BEGIN_SRC
 echo "ts,qArr,instArr,startEx,endEx,flops,serv" > sg_cal_scenario1.csv
-for i in 263000  3618000  6973000  10328000  13683000  17038000  20393000  23748000  27103000  30458000  33813000 
+for i in 263000  3618000  6973000  10328000  13683000  17038000  20393000  23748000  27103000  30458000  33813000
 do
     echo "Calibration for iterAmount=$i"
     scenario=1 parDeg=10 tsFile=../rabbitmqGo/timestamps/tsCal.csv logDir=~/logs_expe/sgLogs/calibration start=$i end=$i incr=1 bash launch.sh
@@ -81,7 +81,7 @@ done
 *** Real world
 
     #+BEGIN_SRC
-scenario=1 parD=10 suffix=testm hostLogPath=${HOME}/logs_expe/goLogs/caca logDir=/logs/ tsFile=/go/src/app/timestamps/default5TimeStamps.csv start=1 end=80000001 iter=2000000 nbSamples=2 durIter=360 bash launchPar.sh
+scenario=1 parD=10 suffix=testm hostLogPath=${HOME}/logs_expe/goLogs/ logDir=/logs/ tsFile=/go/src/app/timestamps/default5TimeStamps.csv start=1 end=80000001 iter=2000000 nbSamples=2 durIter=360 bash launchPar.sh
     #+END_SRC
 
 
